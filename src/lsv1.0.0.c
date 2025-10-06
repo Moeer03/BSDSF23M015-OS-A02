@@ -1,12 +1,12 @@
 /*
- * Programming Assignment 02: lsv1.2.0
- * Added Feature: Horizontal Display (-x)
+ * Programming Assignment 02: lsv1.3.0
+ * Added Feature: Horizontal Display (-x) + Alphabetical Sorting (qsort)
  * Usage:
- *      $ ./lsv1.2.0
- *      $ ./lsv1.2.0 -l
- *      $ ./lsv1.2.0 -x
- *      $ ./lsv1.2.0 /home
- *      $ ./lsv1.2.0 -l /home /etc
+ *      $ ./lsv1.3.0
+ *      $ ./lsv1.3.0 -l
+ *      $ ./lsv1.3.0 -x
+ *      $ ./lsv1.3.0 /home
+ *      $ ./lsv1.3.0 -l /home /etc
  */
 
 #define _XOPEN_SOURCE 700
@@ -36,6 +36,13 @@ void mode_to_string(mode_t mode, char *str);
 void print_long(const char *path, const char *name);
 void print_horizontal(char **files, int count, int max_len, int term_width);
 void print_down_then_across(char **files, int count, int max_len, int term_width);
+
+// Compare function for qsort: alphabetical order
+static int compare_filenames(const void *a, const void *b) {
+    const char *const *pa = (const char *const *)a;
+    const char *const *pb = (const char *const *)b;
+    return strcmp(*pa, *pb);
+}
 
 int main(int argc, char *argv[]) {
     int opt;
@@ -195,15 +202,23 @@ void do_ls(const char *dir, int mode) {
     }
     closedir(dp);
 
+    // ✅ Sort files alphabetically
+    if (count > 1) {
+        qsort(files, count, sizeof(char *), compare_filenames);
+    }
+
+    // Get terminal width
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int term_width = w.ws_col ? w.ws_col : 80;
 
+    // Display output
     if (mode == 2)
         print_horizontal(files, count, max_len, term_width);
     else
         print_down_then_across(files, count, max_len, term_width);
 
+    // Cleanup
     for (size_t i = 0; i < count; i++)
         free(files[i]);
     free(files);
