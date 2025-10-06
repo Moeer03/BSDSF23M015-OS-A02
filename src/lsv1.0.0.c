@@ -1,12 +1,13 @@
 /*
-* Programming Assignment 02: lsv1.1.0
-* Added Feature: Long Listing (-l)
-* Usage:
-*       $ ./lsv1.1.0
-*       $ ./lsv1.1.0 -l
-*       $ ./lsv1.1.0 /home
-*       $ ./lsv1.1.0 -l /home /etc
-*/
+ * Programming Assignment 02: lsv1.2.0
+ * Added Feature: Horizontal Display (-x)
+ * Usage:
+ *      $ ./lsv1.2.0
+ *      $ ./lsv1.2.0 -l
+ *      $ ./lsv1.2.0 -x
+ *      $ ./lsv1.2.0 /home
+ *      $ ./lsv1.2.0 -l /home /etc
+ */
 
 #define _XOPEN_SOURCE 700
 #include <stdio.h>
@@ -21,49 +22,42 @@
 #include <pwd.h>
 #include <grp.h>
 #include <time.h>
-#include <linux/limits.h>   // for PATH_MAX
+#include <linux/limits.h>
 #include <sys/ioctl.h>
 #include <termios.h>
-
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
-
-
-
-void do_ls(const char *dir, int longflag);
+// Function declarations
+void do_ls(const char *dir, int mode);
 void mode_to_string(mode_t mode, char *str);
 void print_long(const char *path, const char *name);
+void print_horizontal(char **files, int count, int max_len, int term_width);
+void print_down_then_across(char **files, int count, int max_len, int term_width);
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     int opt;
-    int longflag = 0;
+    int mode = 0; // 0 = default, 1 = long (-l), 2 = horizontal (-x)
 
-    // parse options (-l for now, more can be added later)
-    while ((opt = getopt(argc, argv, "l")) != -1) {
+    while ((opt = getopt(argc, argv, "lx")) != -1) {
         switch (opt) {
-            case 'l':
-                longflag = 1;
-                break;
-            default:
-                break;
+            case 'l': mode = 1; break;
+            case 'x': mode = 2; break;
+            default: break;
         }
     }
 
-    // no directory args, default to "."
     if (optind == argc) {
-        do_ls(".", longflag);
+        do_ls(".", mode);
     } else {
         for (int i = optind; i < argc; i++) {
-            printf("Directory listing of %s:\n", argv[i]);
-            do_ls(argv[i], longflag);
-            puts("");
+            printf("%s:\n", argv[i]);
+            do_ls(argv[i], mode);
+            printf("\n");
         }
     }
-
     return 0;
 }
 
@@ -74,7 +68,7 @@ void mode_to_string(mode_t mode, char *str) {
              S_ISCHR(mode) ? 'c' :
              S_ISBLK(mode) ? 'b' :
              S_ISFIFO(mode)? 'p' :
-             '-' ;   // skip sockets if S_ISSOCK not available
+             '-';
     str[1] = (mode & S_IRUSR) ? 'r' : '-';
     str[2] = (mode & S_IWUSR) ? 'w' : '-';
     str[3] = (mode & S_IXUSR) ? 'x' : '-';
@@ -86,7 +80,6 @@ void mode_to_string(mode_t mode, char *str) {
     str[9] = (mode & S_IXOTH) ? 'x' : '-';
     str[10] = '\0';
 }
-
 
 // Print one file entry in long listing format
 void print_long(const char *path, const char *name) {
@@ -119,8 +112,39 @@ void print_long(const char *path, const char *name) {
            name);
 }
 
+// Print down-then-across (default)
+void print_down_then_across(char **files, int count, int max_len, int term_width) {
+    int num_cols = term_width / (max_len + 2);
+    if (num_cols < 1) num_cols = 1;
+    int num_rows = (count + num_cols - 1) / num_cols;
+
+    for (int r = 0; r < num_rows; r++) {
+        for (int c = 0; c < num_cols; c++) {
+            int idx = c * num_rows + r;
+            if (idx < count)
+                printf("%-*s", max_len + 2, files[idx]);
+        }
+        printf("\n");
+    }
+}
+
+// Print across (horizontal) for -x mode
+void print_horizontal(char **files, int count, int max_len, int term_width) {
+    int col_width = max_len + 2;
+    int pos = 0;
+    for (int i = 0; i < count; i++) {
+        if (pos + col_width > term_width) {
+            printf("\n");
+            pos = 0;
+        }
+        printf("%-*s", col_width, files[i]);
+        pos += col_width;
+    }
+    printf("\n");
+}
+
 // Directory listing logic
-void do_ls(const char *dir, int longflag) {
+void do_ls(const char *dir, int mode) {
     struct dirent *entry;
     DIR *dp = opendir(dir);
     if (dp == NULL) {
@@ -128,8 +152,8 @@ void do_ls(const char *dir, int longflag) {
         return;
     }
 
-    if (longflag) {
-        // Long listing stays same
+    if (mode == 1) {
+        // Long listing (-l)
         while ((entry = readdir(dp)) != NULL) {
             if (entry->d_name[0] == '.')
                 continue;
@@ -139,12 +163,10 @@ void do_ls(const char *dir, int longflag) {
         return;
     }
 
-    // --- Feature 3: Non-long listing with columns ---
-
-    // Step 1: Read all filenames into dynamic array
-    size_t count = 0, capacity = 50;
-    char **filenames = malloc(capacity * sizeof(char *));
-    if (!filenames) {
+    // Default or -x mode
+    size_t count = 0, capacity = 64;
+    char **files = malloc(capacity * sizeof(char *));
+    if (!files) {
         perror("malloc");
         closedir(dp);
         return;
@@ -155,60 +177,34 @@ void do_ls(const char *dir, int longflag) {
     while ((entry = readdir(dp)) != NULL) {
         if (entry->d_name[0] == '.')
             continue;
-
         if (count >= capacity) {
             capacity *= 2;
-            filenames = realloc(filenames, capacity * sizeof(char *));
-            if (!filenames) {
+            char **tmp = realloc(files, capacity * sizeof(char *));
+            if (!tmp) {
                 perror("realloc");
-                closedir(dp);
-                return;
+                break;
             }
+            files = tmp;
         }
+        files[count] = strdup(entry->d_name);
+        if (!files[count]) break;
 
-        filenames[count] = strdup(entry->d_name);
-        if (!filenames[count]) {
-            perror("strdup");
-            closedir(dp);
-            return;
-        }
-
-        int len = strlen(entry->d_name);
-        if (len > max_len)
-            max_len = len;
-
+        int len = (int)strlen(entry->d_name);
+        if (len > max_len) max_len = len;
         count++;
     }
     closedir(dp);
 
-    if (count == 0) {
-        free(filenames);
-        return;
-    }
-
-    // Step 2: Get terminal width
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
-    int term_width = w.ws_col ? w.ws_col : 80;  // fallback if 0
+    int term_width = w.ws_col ? w.ws_col : 80;
 
-    // Step 3: Compute number of columns and rows
-    int num_cols = term_width / (max_len + 2);
-    if (num_cols < 1) num_cols = 1;
-    int num_rows = (count + num_cols - 1) / num_cols;
+    if (mode == 2)
+        print_horizontal(files, count, max_len, term_width);
+    else
+        print_down_then_across(files, count, max_len, term_width);
 
-    // Step 4: Print down then across
-    for (int r = 0; r < num_rows; r++) {
-        for (int c = 0; c < num_cols; c++) {
-            int idx = c * num_rows + r;
-            if (idx < (int)count)
-                printf("%-*s", max_len + 2, filenames[idx]);
-        }
-        printf("\n");
-    }
-
-    // Step 5: Free memory
-    for (size_t i = 0; i < count; i++) {
-        free(filenames[i]);
-    }
-    free(filenames);
+    for (size_t i = 0; i < count; i++)
+        free(files[i]);
+    free(files);
 }
