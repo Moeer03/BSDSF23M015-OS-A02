@@ -31,12 +31,22 @@
 #define PATH_MAX 4096
 #endif
 
+// 🎨 Color definitions for output
+#define COLOR_RESET   "\033[0m"
+#define COLOR_DIR     "\033[0;34m"  // Blue for directories
+#define COLOR_EXE     "\033[0;32m"  // Green for executables
+#define COLOR_TAR     "\033[0;31m"  // Red for tar/archives (optional)
+#define COLOR_LINK    "\033[0;35m"  // Magenta for symlinks
+
+
 // Function declarations
 void do_ls(const char *dir, int mode);
 void mode_to_string(mode_t mode, char *str);
 void print_long(const char *path, const char *name);
 void print_horizontal(char **files, int count, int max_len, int term_width);
 void print_down_then_across(char **files, int count, int max_len, int term_width);
+void print_colored_name(const char *dir, const char *filename);
+
 
 // Compare function for qsort: alphabetical order
 static int compare_filenames(const void *a, const void *b) {
@@ -89,6 +99,32 @@ void mode_to_string(mode_t mode, char *str) {
     str[10] = '\0';
 }
 
+
+// Determine file color and print accordingly
+void print_colored_name(const char *dir, const char *filename) {
+    struct stat st;
+    char fullpath[PATH_MAX];
+    snprintf(fullpath, PATH_MAX, "%s/%s", dir, filename);
+
+    if (lstat(fullpath, &st) == -1) {
+        perror("lstat");
+        printf("%s", filename);
+        return;
+    }
+
+    if (S_ISDIR(st.st_mode))
+        printf(COLOR_DIR "%s" COLOR_RESET, filename);
+    else if (S_ISLNK(st.st_mode))
+        printf(COLOR_LINK "%s" COLOR_RESET, filename);
+    else if (st.st_mode & S_IXUSR)
+        printf(COLOR_EXE "%s" COLOR_RESET, filename);
+    else if (strstr(filename, ".tar") || strstr(filename, ".zip"))
+        printf(COLOR_TAR "%s" COLOR_RESET, filename);
+    else
+        printf("%s", filename);
+}
+
+
 // Print one file entry in long listing format
 void print_long(const char *path, const char *name) {
     struct stat st;
@@ -129,8 +165,12 @@ void print_down_then_across(char **files, int count, int max_len, int term_width
     for (int r = 0; r < num_rows; r++) {
         for (int c = 0; c < num_cols; c++) {
             int idx = c * num_rows + r;
-            if (idx < count)
-                printf("%-*s", max_len + 2, files[idx]);
+            if (idx < count) {
+                print_colored_name(".", files[idx]);
+                int pad = max_len + 2 - (int)strlen(files[idx]);
+                for (int k = 0; k < pad; k++) printf(" ");
+            }
+
         }
         printf("\n");
     }
@@ -145,7 +185,9 @@ void print_horizontal(char **files, int count, int max_len, int term_width) {
             printf("\n");
             pos = 0;
         }
-        printf("%-*s", col_width, files[i]);
+        print_colored_name(".", files[i]);
+        int pad = col_width - (int)strlen(files[i]);
+        for (int k = 0; k < pad; k++) printf(" ");
         pos += col_width;
     }
     printf("\n");

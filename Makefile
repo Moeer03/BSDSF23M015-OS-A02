@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
 SRC = src/lsv1.0.0.c
-TARGET = lsv1.5.0
+TARGET = ls
 BIN_DIR = bin
 
 all: $(BIN_DIR)/$(TARGET)
