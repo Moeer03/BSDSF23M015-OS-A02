@@ -1,12 +1,13 @@
 /*
- * Programming Assignment 02: lsv1.3.0
- * Added Feature: Horizontal Display (-x) + Alphabetical Sorting (qsort)
+ * Programming Assignment 02: lsv1.4.0
+ * Added Feature: Alphabetical Sorting (qsort) + Horizontal Display (-x)
+ * 
  * Usage:
- *      $ ./lsv1.3.0
- *      $ ./lsv1.3.0 -l
- *      $ ./lsv1.3.0 -x
- *      $ ./lsv1.3.0 /home
- *      $ ./lsv1.3.0 -l /home /etc
+ *      $ ./lsv1.4.0
+ *      $ ./lsv1.4.0 -l
+ *      $ ./lsv1.4.0 -x
+ *      $ ./lsv1.4.0 /home
+ *      $ ./lsv1.4.0 -l /home /etc
  */
 
 #define _XOPEN_SOURCE 700
@@ -203,9 +204,8 @@ void do_ls(const char *dir, int mode) {
     closedir(dp);
 
     // ✅ Sort files alphabetically
-    if (count > 1) {
+    if (count > 1)
         qsort(files, count, sizeof(char *), compare_filenames);
-    }
 
     // Get terminal width
     struct winsize w;
