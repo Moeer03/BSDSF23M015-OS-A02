@@ -1,13 +1,17 @@
 /*
- * Programming Assignment 02: lsv1.4.0
- * Added Feature: Alphabetical Sorting (qsort) + Horizontal Display (-x)
+ * Programming Assignment 02: lsv1.7.0
+ * Added Feature: Recursive Listing (-R)
+ * Previous Features:
+ *  - Alphabetical Sorting (qsort)
+ *  - Horizontal Display (-x)
+ *  - Colored Output
  * 
  * Usage:
- *      $ ./lsv1.4.0
- *      $ ./lsv1.4.0 -l
- *      $ ./lsv1.4.0 -x
- *      $ ./lsv1.4.0 /home
- *      $ ./lsv1.4.0 -l /home /etc
+ *      $ ./lsv1.7.0
+ *      $ ./lsv1.7.0 -l
+ *      $ ./lsv1.7.0 -x
+ *      $ ./lsv1.7.0 -R
+ *      $ ./lsv1.7.0 -Rl /path
  */
 
 #define _XOPEN_SOURCE 700
@@ -35,20 +39,21 @@
 #define COLOR_RESET   "\033[0m"
 #define COLOR_DIR     "\033[0;34m"  // Blue for directories
 #define COLOR_EXE     "\033[0;32m"  // Green for executables
-#define COLOR_TAR     "\033[0;31m"  // Red for tar/archives (optional)
+#define COLOR_TAR     "\033[0;31m"  // Red for tar/archives
 #define COLOR_LINK    "\033[0;35m"  // Magenta for symlinks
 
+// Global flags
+int recursive_flag = 0; // -R flag
 
 // Function declarations
 void do_ls(const char *dir, int mode);
 void mode_to_string(mode_t mode, char *str);
 void print_long(const char *path, const char *name);
-void print_horizontal(char **files, int count, int max_len, int term_width);
-void print_down_then_across(char **files, int count, int max_len, int term_width);
+void print_horizontal(const char *dir, char **files, int count, int max_len, int term_width);
+void print_down_then_across(const char *dir, char **files, int count, int max_len, int term_width);
 void print_colored_name(const char *dir, const char *filename);
 
-
-// Compare function for qsort: alphabetical order
+// Compare function for qsort
 static int compare_filenames(const void *a, const void *b) {
     const char *const *pa = (const char *const *)a;
     const char *const *pb = (const char *const *)b;
@@ -59,14 +64,17 @@ int main(int argc, char *argv[]) {
     int opt;
     int mode = 0; // 0 = default, 1 = long (-l), 2 = horizontal (-x)
 
-    while ((opt = getopt(argc, argv, "lx")) != -1) {
+    // Parse options: l, x, R
+    while ((opt = getopt(argc, argv, "lxR")) != -1) {
         switch (opt) {
             case 'l': mode = 1; break;
             case 'x': mode = 2; break;
+            case 'R': recursive_flag = 1; break;
             default: break;
         }
     }
 
+    // Default: current directory
     if (optind == argc) {
         do_ls(".", mode);
     } else {
@@ -99,7 +107,6 @@ void mode_to_string(mode_t mode, char *str) {
     str[10] = '\0';
 }
 
-
 // Determine file color and print accordingly
 void print_colored_name(const char *dir, const char *filename) {
     struct stat st;
@@ -124,7 +131,6 @@ void print_colored_name(const char *dir, const char *filename) {
         printf("%s", filename);
 }
 
-
 // Print one file entry in long listing format
 void print_long(const char *path, const char *name) {
     struct stat st;
@@ -146,18 +152,19 @@ void print_long(const char *path, const char *name) {
     struct tm *tm = localtime(&st.st_mtime);
     strftime(timebuf, sizeof(timebuf), "%b %e %H:%M", tm);
 
-    printf("%s %2lu %s %s %6lld %s %s\n",
+    printf("%s %2lu %s %s %6lld %s ",
            perms,
            (unsigned long)st.st_nlink,
            pw ? pw->pw_name : "???",
            gr ? gr->gr_name : "???",
            (long long)st.st_size,
-           timebuf,
-           name);
+           timebuf);
+    print_colored_name(path, name);
+    printf("\n");
 }
 
 // Print down-then-across (default)
-void print_down_then_across(char **files, int count, int max_len, int term_width) {
+void print_down_then_across(const char *dir, char **files, int count, int max_len, int term_width) {
     int num_cols = term_width / (max_len + 2);
     if (num_cols < 1) num_cols = 1;
     int num_rows = (count + num_cols - 1) / num_cols;
@@ -166,18 +173,17 @@ void print_down_then_across(char **files, int count, int max_len, int term_width
         for (int c = 0; c < num_cols; c++) {
             int idx = c * num_rows + r;
             if (idx < count) {
-                print_colored_name(".", files[idx]);
+                print_colored_name(dir, files[idx]);
                 int pad = max_len + 2 - (int)strlen(files[idx]);
                 for (int k = 0; k < pad; k++) printf(" ");
             }
-
         }
         printf("\n");
     }
 }
 
 // Print across (horizontal) for -x mode
-void print_horizontal(char **files, int count, int max_len, int term_width) {
+void print_horizontal(const char *dir, char **files, int count, int max_len, int term_width) {
     int col_width = max_len + 2;
     int pos = 0;
     for (int i = 0; i < count; i++) {
@@ -185,7 +191,7 @@ void print_horizontal(char **files, int count, int max_len, int term_width) {
             printf("\n");
             pos = 0;
         }
-        print_colored_name(".", files[i]);
+        print_colored_name(dir, files[i]);
         int pad = col_width - (int)strlen(files[i]);
         for (int k = 0; k < pad; k++) printf(" ");
         pos += col_width;
@@ -193,7 +199,7 @@ void print_horizontal(char **files, int count, int max_len, int term_width) {
     printf("\n");
 }
 
-// Directory listing logic
+// Directory listing logic (supports recursion)
 void do_ls(const char *dir, int mode) {
     struct dirent *entry;
     DIR *dp = opendir(dir);
@@ -202,8 +208,11 @@ void do_ls(const char *dir, int mode) {
         return;
     }
 
+    if (recursive_flag)
+        printf("\n%s:\n", dir);
+
+    // For -l mode
     if (mode == 1) {
-        // Long listing (-l)
         while ((entry = readdir(dp)) != NULL) {
             if (entry->d_name[0] == '.')
                 continue;
@@ -213,7 +222,7 @@ void do_ls(const char *dir, int mode) {
         return;
     }
 
-    // Default or -x mode
+    // Default / -x mode
     size_t count = 0, capacity = 64;
     char **files = malloc(capacity * sizeof(char *));
     if (!files) {
@@ -223,7 +232,6 @@ void do_ls(const char *dir, int mode) {
     }
 
     int max_len = 0;
-
     while ((entry = readdir(dp)) != NULL) {
         if (entry->d_name[0] == '.')
             continue;
@@ -238,29 +246,39 @@ void do_ls(const char *dir, int mode) {
         }
         files[count] = strdup(entry->d_name);
         if (!files[count]) break;
-
         int len = (int)strlen(entry->d_name);
         if (len > max_len) max_len = len;
         count++;
     }
     closedir(dp);
 
-    // ✅ Sort files alphabetically
     if (count > 1)
         qsort(files, count, sizeof(char *), compare_filenames);
 
-    // Get terminal width
     struct winsize w;
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     int term_width = w.ws_col ? w.ws_col : 80;
 
-    // Display output
     if (mode == 2)
-        print_horizontal(files, count, max_len, term_width);
+        print_horizontal(dir, files, count, max_len, term_width);
     else
-        print_down_then_across(files, count, max_len, term_width);
+        print_down_then_across(dir, files, count, max_len, term_width);
 
-    // Cleanup
+    // 🔁 Recursively process subdirectories
+    if (recursive_flag) {
+        for (size_t i = 0; i < count; i++) {
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
+
+            struct stat st;
+            if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                if (strcmp(files[i], ".") != 0 && strcmp(files[i], "..") != 0) {
+                    do_ls(path, mode);
+                }
+            }
+        }
+    }
+
     for (size_t i = 0; i < count; i++)
         free(files[i]);
     free(files);
